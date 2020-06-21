@@ -18,12 +18,20 @@ class ReplayBuffer:
         """
         This method adds a transition to the replay buffer.
         """
+        i_delete = self.history_length // 10
+        if len(self._data.states) == self.history_length:
+            self._data.states.pop(i_delete)
+            self._data.actions.pop(i_delete)
+            self._data.next_states.pop(i_delete)
+            self._data.rewards.pop(i_delete)
+            self._data.dones.pop(i_delete)
+
         self._data.states.append(state)
         self._data.actions.append(action)
         self._data.next_states.append(next_state)
         self._data.rewards.append(reward)
         self._data.dones.append(done)
-
+        
     def next_batch(self, batch_size):
         """
         This method samples a batch of transitions.

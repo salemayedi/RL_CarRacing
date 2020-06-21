@@ -23,7 +23,7 @@ def action_to_id(a):
     if all(a == [-1.0, 0.0, 0.0]): return LEFT               # LEFT: 1
     elif all(a == [1.0, 0.0, 0.0]): return RIGHT             # RIGHT: 2
     elif all(a == [0.0, 1.0, 0.0]): return ACCELERATE        # ACCELERATE: 3
-    elif all(a == [0.0, 0.0, 0.2]): return BRAKE             # BRAKE: 4
+    elif np.allclose(a,[0.0,0.0,0.2],atol = 1e-3) : return BRAKE             # BRAKE: 4
     else:       
         return STRAIGHT                                      # STRAIGHT = 0
 
@@ -45,6 +45,52 @@ def id_to_action(action_id, max_speed=0.8):
         return np.array([0.0, 0.0, 0.1])
     else:
         return np.array([0.0, 0.0, 0.0])
+
+def balance_data (X, y, drop_prob, id_action):
+    """
+    In the data, we are having a prblem of unbalanced data. the straight actions are so much compared to the other data.
+    subsampling uniformly.
+    """
+    straight_action = np.zeros((1))
+    straight_action [0] = id_action
+    is_straight = np.all(y==straight_action, axis=1)
+    # the rest 
+    other_actions_index = np.where(np.logical_not(is_straight))[0]
+    # random drop straights
+    drop_mask = np.random.rand(len(is_straight)) > drop_prob
+    straight_keep = drop_mask * is_straight
+    # Get the index of straight samples that were kept
+    straight_keep_index = np.where(straight_keep)[0]
+    # Put all actions that we want to keep together
+    final_keep = np.squeeze(np.hstack((other_actions_index, straight_keep_index)))
+    final_keep = np.sort(final_keep)
+    X_balanced = X[final_keep]
+    y_balanced = y[final_keep]
+
+    return X_balanced,y_balanced
+
+def augment_acc_data (X, y, drop_prob = 0.31):
+    """
+    In the data, we are having a prblem of unbalanced data. the straight actions are so much compared to the other data.
+    subsampling uniformly.
+    """
+    straight_action = np.zeros((1))
+    straight_action [0] = 0
+    acc_action = np.zeros((1))
+    acc_action[0] = 3.0
+
+    is_straight = np.all(y==straight_action, axis=1)
+    # the rest 
+    other_actions_index = np.where(np.logical_not(is_straight))[0]
+    # random drop straights
+    change_mask = np.random.rand(len(is_straight)) <= drop_prob
+    new_actions = change_mask * is_straight
+    # Get the index of straight samples that were kept
+    new_action_index = np.where(new_actions)[0]
+    # Put all actions that we want to keep together
+    for i in range (len (new_action_index)):
+        y[i] = acc_action
+    return X,y
     
 
 class EpisodeStats:

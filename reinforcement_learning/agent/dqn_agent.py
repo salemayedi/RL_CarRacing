@@ -12,7 +12,7 @@ def soft_update(target, source, tau):
 
 class DQNAgent:
 
-    def __init__(self, Q, Q_target, num_actions, epsilon_decay = False, double = False, gamma=0.95, batch_size=64, epsilon=0.1, tau=0.01, lr=1e-4, history_length=0):
+    def __init__(self, Q, Q_target, num_actions, double = False, gamma=0.95, batch_size=64, tau=0.01, lr=1e-4, history_length=0):
         """
          Q-Learning agent for off-policy TD control using Function Approximation.
          Finds the optimal greedy policy while following an epsilon-greedy policy.
@@ -39,13 +39,7 @@ class DQNAgent:
         self.batch_size = batch_size
         self.gamma = gamma
         self.tau = tau
-        self.epsilon = epsilon
-        # epsilon decay:
-        self.epsilon_decay = epsilon_decay
-        self.steps_done = 0
-        self.EPS_DECAY = 20000
-        self.EPS_START = 0.9
-        self.EPS_END = 0.05
+        #self.epsilon = epsilon
 
         # Double DQN
         self.double = double
@@ -77,23 +71,49 @@ class DQNAgent:
         # result Q target
         batch_next_states = torch.from_numpy(batch_next_states).float().cuda()
         batch_states = torch.from_numpy(batch_states).float().cuda()
-        batch_rewards = torch.from_numpy(batch_rewards).float().cuda()
-        batch_dones = torch.from_numpy(batch_dones).float().cuda()
+        batch_rewards = torch.from_numpy(batch_rewards).float().cuda().unsqueeze(1) #batch size * 1
+        batch_dones = torch.from_numpy(batch_dones).float().cuda().unsqueeze(1)#batch size * 1
         #batch_actions = torch.from_numpy(batch_actions).long().cuda() #indices should be detached
         #print('Rewards: ', batch_rewards)
 
-        with torch.no_grad():
-            Q_target_next_output = self.Q_target(batch_next_states)
-            Q_target_values = torch.max(Q_target_next_output, dim=1)[0]
-            #print('Q_target_values: ', Q_target_values)
-            td_target = batch_rewards + self.gamma * Q_target_values* (1 - batch_dones) # y        
-        #td_target = td_target.detach() # to make sure not backropagate, detach from pytorch graph
-        
+        # Double DQN:
+        if self.double:
+            self.Q_target.eval()
+            self.Q.eval()
+            with torch.no_grad():
+                # get argmax actions of Q(next states)
+                Q_next_output = self.Q(batch_next_states)
+                Q_target_actions = torch.argmax(Q_next_output, dim = 1).unsqueeze(1)
+                # compute Q_target(next states)
+                Q_target_next_output = self.Q_target(batch_next_states)
+                # compute Q_target(next states) with indices of argmax actions of Q(next states)
+                
+                #Q_target_next_output = Q_target_next_output.detach()
+                
+                Q_target_Double = Q_target_next_output[torch.arange(Q_target_next_output.shape[0]) , Q_target_actions.squeeze(1).detach()].unsqueeze(1)
+                #Q_target_Double = Q_target_next_output.gather(1, Q_target_actions.long())
+                td_target = batch_rewards + self.gamma * Q_target_Double* (1 - batch_dones)
 
-        # result Q
-        Q_output_states = self.Q(batch_states)
-        Q_output = Q_output_states[torch.arange(Q_output_states.shape[0]) , batch_actions] #indices should be detached
+        else:
+            # DQN
+            self.Q_target.eval()
+            self.Q.eval()
+            with torch.no_grad():
+                Q_target_next_output = self.Q_target(batch_next_states)
+                
+                #Q_target_next_output = Q_target_next_output.detach()
+                
+                Q_target_values = torch.max(Q_target_next_output, dim=1)[0].unsqueeze(1)
+                #print('Q_target_values: ', Q_target_values)
+                td_target = batch_rewards + self.gamma * Q_target_values* (1 - batch_dones) # y 
         
+        td_target = td_target.detach() # to make sure not backropagate, detach from pytorch graph
+        # result Q
+        self.Q.train() # train 
+        Q_output_states = self.Q(batch_states)
+        Q_output = Q_output_states[torch.arange(Q_output_states.shape[0]) , batch_actions].unsqueeze(1) #indices should be detached
+
+            
 
         # to check if my parameters have gradients
         for name, param in self.Q.named_parameters():
@@ -101,33 +121,20 @@ class DQNAgent:
                 print('None ', name, param.grad)
             #else:
             #    print('not None ',name, param.grad.sum())
-
-        # Double DQN:
-        if self.double:
-            with torch.no_grad():
-                # get argmax actions of Q(next states)
-                Q_next_output = self.Q(batch_next_states)
-                Q_target_actions = torch.argmax(Q_next_output, dim = 1)
-                # compute Q_target(next states)
-                Q_target_next_output = self.Q_target(batch_next_states)
-                # compute Q_target(next states) with indices of argmax actions of Q(next states)
-                Q_target_Double = Q_target_next_output[torch.arange(Q_target_next_output.shape[0]) , Q_target_actions.detach()]
-                td_target_Double = batch_rewards + self.gamma * Q_target_Double* (1 - batch_dones)
-            #update Double Q network
-            loss = self.loss_function (Q_output, td_target_Double)
-
-        else:
-            # update Q network
-            loss = self.loss_function (Q_output, td_target)
         
+        loss = self.loss_function (Q_output, td_target)
         self.optimizer.zero_grad()
         loss.backward()
+        #Gradient clipping:
+        clip = 1
+        torch.nn.utils.clip_grad_norm_(self.Q.parameters(),clip)
         self.optimizer.step()
+        
         # soft update of Q_target
         soft_update(self.Q_target, self.Q, self.tau)
 
 
-    def act(self, state, deterministic):
+    def act(self, state, deterministic, epsilon):
         """
         This method creates an epsilon-greedy policy based on the Q-function approximator and epsilon (probability to select a random action)    
         Args:
@@ -137,23 +144,18 @@ class DQNAgent:
             action id
         """
         r = np.random.uniform()
-
-        # epsilon decay
-        if self.epsilon_decay:
-            self.epsilon = self.EPS_END + (self.EPS_START - self.EPS_END) * \
-                math.exp(-1. * self.steps_done / self.EPS_DECAY)
-            self.steps_done += 1
-            #print('epsilon: ', self.epsilon)
-        
-        if deterministic or r > self.epsilon:
+        if deterministic or r > epsilon:
             # TODO: take greedy action (argmax)
             # action_id = ...
-            state = torch.from_numpy(state).float().cuda()
-            Q_output = self.Q( state )
-            action_id = torch.argmax(Q_output.unsqueeze(0), dim = 1)
-            action_id = action_id.item()
-            #print('this is action_id: ', action_id)
+            self.Q.eval()
+            with torch.no_grad():
+                state = torch.from_numpy(state).float().cuda().unsqueeze(0)
+                Q_output = self.Q( state )
+                action_id = torch.argmax(Q_output, dim = 1)
+                action_id = action_id.item()
+                #print('this is action_id: ', action_id)
             
+            self.Q.train()
         else:
 
             # TODO: sample random action
@@ -163,7 +165,6 @@ class DQNAgent:
             # action_id = ...
             #print('####################else################')
             l = list(np.arange(self.num_actions))
-            import random
             action_id = random.choice (l)
             #print('this is action_id: ', action_id)
         return action_id

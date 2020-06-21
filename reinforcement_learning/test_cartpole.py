@@ -19,15 +19,16 @@ if __name__ == "__main__":
     num_actions = 2
     Q = MLP (state_dim, num_actions)
     Q_target = MLP (state_dim, num_actions)
-    PATH = '/home/salem/Documents/freiburg/Lab/Robotics/dl-lab-ss19/exercise3_R/reinforcement_learning/models_cartpole/dqn_agent.pt'
+    PATH = '/home/salem/Documents/freiburg/Lab/CarRacing/reinforcement_learning/models_cartpole/best_eval_dqn_agent.pt'
     Q.load_state_dict(torch.load(PATH), strict=False)
     Q_target.load_state_dict(torch.load(PATH), strict=False)
-    agent = DQNAgent(Q, Q_target, num_actions, epsilon_decay= False, double = True)
+    agent = DQNAgent(Q, Q_target, num_actions, double = True)
     n_test_episodes = 150
 
     episode_rewards = []
     for i in range(n_test_episodes):
-        stats = run_episode(env, agent, deterministic=True, do_training=False, rendering = True)
+        stats = run_episode(env, agent,eps =0.1, deterministic=True, do_training=False, rendering = True)
+        print(stats.episode_reward)
         episode_rewards.append(stats.episode_reward)
 
     # save results in a dictionary and write them into a .json file

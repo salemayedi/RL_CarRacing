@@ -9,11 +9,12 @@ import gym
 import os
 import json
 
+import torch
 from agent.bc_agent import BCAgent
 from utils import *
 
 
-def run_episode(env, agent, rendering=True, max_timesteps=1000):
+def run_episode(env, agent, history_length, rendering=True, max_timesteps=1000):
     
     episode_reward = 0
     step = 0
@@ -22,12 +23,17 @@ def run_episode(env, agent, rendering=True, max_timesteps=1000):
     
     # fix bug of curropted states without rendering in racingcar gym environment
     env.viewer.window.dispatch_events() 
+    image_hist = []
 
+    state = rgb2gray(state).reshape(96, 96) / 255.0
+    image_hist.extend([state] * (history_length))
+    state = np.array(image_hist).reshape(96, 96, history_length)
     while True:
         
         # TODO: preprocess the state in the same way than in your preprocessing in train_agent.py
         #    state = ...
-
+        # import pdb; pdb.set_trace()
+        state = torch.FloatTensor(state).unsqueeze(0)
         
         # TODO: get the action from your agent! You need to transform the discretized actions to continuous
         # actions.
@@ -36,9 +42,19 @@ def run_episode(env, agent, rendering=True, max_timesteps=1000):
         #       - just in case your agent misses the first turn because it is too fast: you are allowed to clip the acceleration in test_agent.py
         #       - you can use the softmax output to calculate the amount of lateral acceleration
         # a = ...
+        action = agent.predict(state)
+        action = torch.argmax(action, dim = 1).item()
+        action = id_to_action(action )
+        next_state, r, done, info = env.step(action)   
+        episode_reward += r
+        
+        # transform next state
+        next_state = rgb2gray(next_state).reshape(96, 96) / 255.0
+        image_hist.append(next_state)
+        image_hist.pop(0)
+#        import pdb; pdb.set_trace()
+        next_state = np.array(image_hist).reshape(96, 96, history_length)
 
-        next_state, r, done, info = env.step(a)   
-        episode_reward += r       
         state = next_state
         step += 1
         
@@ -61,12 +77,15 @@ if __name__ == "__main__":
     # TODO: load agent
     # agent = BCAgent(...)
     # agent.load("models/bc_agent.pt")
+    history_length = 3
+    agent = BCAgent (history_length)
+    agent.load("/home/salem/Documents/freiburg/Lab/CarRacing/imitation_learning/models/agent.pt")
 
     env = gym.make('CarRacing-v0').unwrapped
 
     episode_rewards = []
     for i in range(n_test_episodes):
-        episode_reward = run_episode(env, agent, rendering=rendering)
+        episode_reward = run_episode(env, agent, history_length, rendering=rendering)
         episode_rewards.append(episode_reward)
 
     # save results in a dictionary and write them into a .json file
