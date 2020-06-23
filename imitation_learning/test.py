@@ -12,7 +12,27 @@ import json
 import torch
 from agent.bc_agent import BCAgent
 from utils import *
+from collections import deque
 
+
+def check_freeze (act_hist, action):        
+    first_action = act_hist[0]
+    for a in act_hist:
+        if a!=first_action: # check if all the actions are the same in the last 100 actions
+            return False
+        if int(a) == 3: # check if we had an acceleration in the last 100 actions
+            return False
+    # if we came here, it means that we are stuck somewhere
+    return True
+
+def check_stcuk (act_hist, action):
+    if action == 1 or action == 2:
+        return False
+    
+    if act_hist.count(3)>10: # check if we had an acceleration in the last 100 actions
+        return False
+    # if we came here, it means that we are stuck somewhere
+    return True
 
 def run_episode(env, agent, history_length, rendering=True, max_timesteps=1000):
     
@@ -24,6 +44,10 @@ def run_episode(env, agent, history_length, rendering=True, max_timesteps=1000):
     # fix bug of curropted states without rendering in racingcar gym environment
     env.viewer.window.dispatch_events() 
     image_hist = []
+    # action history, we are going to accelerate if we freeze
+    max_len_action_history = 50
+    action_history = deque(maxlen = max_len_action_history)
+
 
     state = rgb2gray(state).reshape(96, 96) / 255.0
     image_hist.extend([state] * (history_length))
@@ -44,6 +68,20 @@ def run_episode(env, agent, history_length, rendering=True, max_timesteps=1000):
         # a = ...
         action = agent.predict(state)
         action = torch.argmax(action, dim = 1).item()
+        
+        # append in action history 
+        if step < max_len_action_history:
+            action_history.append(action)
+        else:
+            if check_stcuk (action_history, action):
+                #print('the network freezed')
+                action = 3 # if we freeze, we accelerate
+            action_history.append(action)
+            action_history.popleft()
+            
+            
+        
+        # Continue
         action = id_to_action(action )
         next_state, r, done, info = env.step(action)   
         episode_reward += r
@@ -62,6 +100,7 @@ def run_episode(env, agent, history_length, rendering=True, max_timesteps=1000):
             env.render()
 
         if done or step > max_timesteps: 
+            print('############## Episode Reward: ', episode_reward)
             break
 
     return episode_reward
@@ -79,7 +118,7 @@ if __name__ == "__main__":
     # agent.load("models/bc_agent.pt")
     history_length = 3
     agent = BCAgent (history_length)
-    agent.load("/home/salem/Documents/freiburg/Lab/CarRacing/imitation_learning/models/agent.pt")
+    agent.load("/home/salem/Documents/freiburg/Lab/CarRacing/imitation_learning/models/agent_best.pt")
 
     env = gym.make('CarRacing-v0').unwrapped
 

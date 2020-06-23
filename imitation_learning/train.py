@@ -62,7 +62,7 @@ def preprocessing(X_train, y_train, X_valid, y_valid, history_length=1):
     # balance X_train and y_train data
     X_train, y_train = balance_data (X_train, y_train, 0.375, 1) # drop probability:0.5 for left action
     X_train, y_train = balance_data (X_train, y_train, 0.85, 0) # drop probability:0.885 for left action
-    X_train, y_train = augment_acc_data(X_train, y_train) # augment acceleration
+    #X_train, y_train = augment_acc_data(X_train, y_train) # augment acceleration
     # History:
     # At first you should only use the current image as input to your network to learn the next action. Then the input states
     # have shape (96, 96, 1). Later, add a history of the last N images to your state so that a state has shape (96, 96, N).
